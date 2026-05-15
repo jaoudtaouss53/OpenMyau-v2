@@ -10,16 +10,13 @@ import myau.util.RotationUtil;
 import myau.property.properties.BooleanProperty;
 import myau.property.properties.FloatProperty;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockEndStone;
 import net.minecraft.block.BlockGlass;
 import net.minecraft.block.BlockObsidian;
+import net.minecraft.block.BlockPane;
 import net.minecraft.block.BlockPlanks;
 import net.minecraft.block.BlockStainedGlass;
-import net.minecraft.block.BlockStainedGlassPane;
-import net.minecraft.block.BlockGlassPane;
-import net.minecraft.block.properties.IProperty;
-import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemFishingRod;
@@ -54,10 +51,16 @@ public class FastPlace extends Module {
     }
 
     private boolean isGlass(Block block) {
-        return block instanceof BlockGlass
-                || block instanceof BlockStainedGlass
-                || block instanceof BlockGlassPane
-                || block instanceof BlockStainedGlassPane;
+        // BlockGlass covers regular glass, BlockStainedGlass covers colored glass,
+        // BlockPane covers both glass panes and stained glass panes (and iron bars)
+        if (block instanceof BlockGlass || block instanceof BlockStainedGlass) {
+            return true;
+        }
+        if (block instanceof BlockPane) {
+            // Exclude iron bars - only allow glass panes
+            return block == Blocks.glass_pane || block == Blocks.stained_glass_pane;
+        }
+        return false;
     }
 
     private boolean canPlace() {
@@ -72,7 +75,7 @@ public class FastPlace extends Module {
                 if (skipObsidian.getValue() && block instanceof BlockObsidian) {
                     return false;
                 }
-                if (skipEndStone.getValue() && block instanceof BlockEndStone) {
+                if (skipEndStone.getValue() && block == Blocks.end_stone) {
                     return false;
                 }
                 if (skipOakPlanks.getValue() && isOakPlanks(stack)) {
