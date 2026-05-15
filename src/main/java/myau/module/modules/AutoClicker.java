@@ -28,6 +28,7 @@ public class AutoClicker extends Module {
     public final BooleanProperty blockHit = new BooleanProperty("block-hit", false);
     public final FloatProperty blockHitTicks = new FloatProperty("block-hit-ticks", 1.5F, 1.0F, 20.0F, this.blockHit::getValue);
     public final IntProperty blockHitChance = new IntProperty("block-hit-chance", 100, 0, 100, this.blockHit::getValue);
+    public final FloatProperty blockHitRange = new FloatProperty("block-hit-range", 4.0F, 1.0F, 8.0F, this.blockHit::getValue);
     public final BooleanProperty weaponsOnly = new BooleanProperty("weapons-only", true);
     public final BooleanProperty allowTools = new BooleanProperty("allow-tools", false, this.weaponsOnly::getValue);
     public final BooleanProperty breakBlocks = new BooleanProperty("break-blocks", true);
@@ -90,6 +91,20 @@ public class AutoClicker extends Module {
                 .anyMatch(this::isValidTarget);
     }
 
+    // Checks if any non-self player is within blockHitRange distance
+    private boolean isPlayerNearby() {
+        double rangeSq = this.blockHitRange.getValue() * this.blockHitRange.getValue();
+        return mc.theWorld
+                .loadedEntityList
+                .stream()
+                .filter(e -> e instanceof EntityPlayer)
+                .map(e -> (EntityPlayer) e)
+                .anyMatch(p -> p != mc.thePlayer
+                        && p != mc.thePlayer.ridingEntity
+                        && p.deathTime <= 0
+                        && p.getDistanceSqToEntity(mc.thePlayer) <= rangeSq);
+    }
+
     public AutoClicker() {
         super("AutoClicker", false);
     }
@@ -117,23 +132,28 @@ public class AutoClicker extends Module {
                 }
                 if (this.isEnabled() && this.canClick() && mc.gameSettings.keyBindAttack.isKeyDown()) {
                     if (!mc.thePlayer.isUsingItem()) {
+                        boolean didClickThisTick = false;
                         while (this.clickDelay <= 0L) {
                             this.clickPending = true;
                             this.clickDelay = this.clickDelay + this.getNextClickDelay();
                             KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindAttack.getKeyCode(), false);
                             KeyBindUtil.pressKeyOnce(mc.gameSettings.keyBindAttack.getKeyCode());
+                            didClickThisTick = true;
+                        }
 
-                            // Perfect-timed chance block-hit: rolled per auto-click
-                            if (this.blockHit.getValue()
-                                    && this.blockHitDelay <= 0L
-                                    && ItemUtil.isHoldingSword()
-                                    && !mc.thePlayer.isUsingItem()
-                                    && Math.random() * 100.0 < this.blockHitChance.getValue()) {
-                                this.blockHitPending = true;
-                                this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
-                                KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
-                                KeyBindUtil.pressKeyOnce(mc.gameSettings.keyBindUseItem.getKeyCode());
-                            }
+                        // Roll blockhit ONCE per tick (not per queued click) — fixes inflated chance.
+                        // Only blockhit if: a click actually fired, a player is nearby, and chance roll passes.
+                        if (didClickThisTick
+                                && this.blockHit.getValue()
+                                && this.blockHitDelay <= 0L
+                                && ItemUtil.isHoldingSword()
+                                && !mc.thePlayer.isUsingItem()
+                                && this.isPlayerNearby()
+                                && Math.random() * 100.0 < this.blockHitChance.getValue()) {
+                            this.blockHitPending = true;
+                            this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
+                            KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
+                            KeyBindUtil.pressKeyOnce(mc.gameSettings.keyBindUseItem.getKeyCode());
                         }
                     }
                 }
