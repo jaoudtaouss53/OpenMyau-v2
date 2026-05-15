@@ -1,77 +1,102 @@
 package myau.module.modules;
 
-import myau.Myau;
 import myau.event.EventTarget;
 import myau.event.types.EventType;
-import myau.events.TickEvent;
+import myau.event.types.Priority;
+import myau.events.MoveInputEvent;
+import myau.events.PacketEvent;
 import myau.module.Module;
-import myau.util.ItemUtil;
-import myau.util.KeyBindUtil;
-import myau.property.properties.BooleanProperty;
-import myau.property.properties.IntProperty;
-import myau.util.TeamUtil;
+import myau.util.TimerUtil;
+import myau.property.properties.FloatProperty;
 import net.minecraft.client.Minecraft;
-import net.minecraft.util.MovingObjectPosition.MovingObjectType;
+import net.minecraft.network.play.client.C02PacketUseEntity;
+import net.minecraft.network.play.client.C02PacketUseEntity.Action;
+import net.minecraft.potion.Potion;
 
-public class AutoTool extends Module {
+public class Wtap extends Module {
     private static final Minecraft mc = Minecraft.getMinecraft();
-    private int currentToolSlot = -1;
-    private int previousSlot = -1;
-    private int tickDelayCounter = 0;
-    public final IntProperty switchDelay = new IntProperty("delay", 0, 0, 5);
-    public final BooleanProperty switchBack = new BooleanProperty("switch-back", true);
-    public final BooleanProperty sneakOnly = new BooleanProperty("sneak-only", true);
+    private final TimerUtil timer = new TimerUtil();
+    private boolean active = false;
+    private boolean stopForward = false;
+    private long delayTicks = 0L;
+    private long durationTicks = 0L;
+    public final FloatProperty delay = new FloatProperty("delay", 5.5F, 0.0F, 10.0F);
+    public final FloatProperty duration = new FloatProperty("duration", 1.5F, 1.0F, 5.0F);
+    public final FloatProperty cooldown = new FloatProperty("cooldown", 500.0F, 100.0F, 1000.0F);
 
-    public AutoTool() {
-        super("AutoTool", false);
+    private boolean canTrigger() {
+        return !(mc.thePlayer.movementInput.moveForward < 0.8F)
+                && !mc.thePlayer.isCollidedHorizontally
+                && (!((float) mc.thePlayer.getFoodStats().getFoodLevel() <= 6.0F) || mc.thePlayer.capabilities.allowFlying)
+                && (mc.thePlayer.isSprinting()
+                || !mc.thePlayer.isUsingItem() && !mc.thePlayer.isPotionActive(Potion.blindness) && mc.gameSettings.keyBindSprint.isKeyDown());
     }
 
-    public boolean isKillAura() {
-        KillAura killAura = (KillAura) Myau.moduleManager.modules.get(KillAura.class);
-        if (!killAura.isEnabled()) return false;
-        return TeamUtil.isEntityLoaded(killAura.getTarget()) && killAura.isAttackAllowed();
+    public Wtap() {
+        super("WTap", false);
     }
 
-    @EventTarget
-    public void onTick(TickEvent event) {
-        if (this.isEnabled() && event.getType() == EventType.PRE) {
-            if (this.currentToolSlot != -1 && this.currentToolSlot != mc.thePlayer.inventory.currentItem) {
-                this.currentToolSlot = -1;
-                this.previousSlot = -1;
+    @EventTarget(Priority.LOWEST)
+    public void onMoveInput(MoveInputEvent event) {
+        if (!this.isEnabled()) {
+            this.reset();
+            return;
+        }
+        if (this.active) {
+            // Cancel if player is no longer in a valid state to wtap
+            if (!this.stopForward && !this.canTrigger()) {
+                this.reset();
+                return;
             }
-            if (mc.objectMouseOver != null
-                    && mc.objectMouseOver.typeOfHit == MovingObjectType.BLOCK
-                    && mc.gameSettings.keyBindAttack.isKeyDown()
-                    && !mc.thePlayer.isUsingItem()
-                    && !isKillAura()) {
-                if (this.tickDelayCounter >= this.switchDelay.getValue()
-                        && (!(Boolean) this.sneakOnly.getValue() || KeyBindUtil.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode()))) {
-                    int slot = ItemUtil.findInventorySlot(
-                            mc.thePlayer.inventory.currentItem, mc.theWorld.getBlockState(mc.objectMouseOver.getBlockPos()).getBlock()
-                    );
-                    if (mc.thePlayer.inventory.currentItem != slot) {
-                        if (this.previousSlot == -1) {
-                            this.previousSlot = mc.thePlayer.inventory.currentItem;
-                        }
-                        mc.thePlayer.inventory.currentItem = this.currentToolSlot = slot;
-                    }
-                }
-                this.tickDelayCounter++;
+
+            // Phase 1: waiting out the delay before zeroing forward input
+            if (this.delayTicks > 0L) {
+                this.delayTicks -= 50L;
+                return;
+            }
+
+            // Phase 2: actively zeroing forward input for `duration` ticks
+            if (this.durationTicks > 0L) {
+                this.durationTicks -= 50L;
+                this.stopForward = true;
+                mc.thePlayer.movementInput.moveForward = 0.0F;
+                // Also kill sprint state so the server fully releases sprint
+                mc.thePlayer.setSprinting(false);
             } else {
-                if (this.switchBack.getValue() && this.previousSlot != -1) {
-                    mc.thePlayer.inventory.currentItem = this.previousSlot;
-                }
-                this.currentToolSlot = -1;
-                this.previousSlot = -1;
-                this.tickDelayCounter = 0;
+                // Duration finished — wtap complete
+                this.active = false;
+                this.stopForward = false;
             }
         }
     }
 
+    @EventTarget
+    public void onPacket(PacketEvent event) {
+        if (this.isEnabled() && !event.isCancelled() && event.getType() == EventType.SEND) {
+            if (event.getPacket() instanceof C02PacketUseEntity
+                    && ((C02PacketUseEntity) event.getPacket()).getAction() == Action.ATTACK
+                    && !this.active
+                    && this.timer.hasTimeElapsed((long) this.cooldown.getValue())
+                    && mc.thePlayer.isSprinting()
+                    && this.canTrigger()) {
+                this.timer.reset();
+                this.active = true;
+                this.stopForward = false;
+                this.delayTicks = (long) (50.0F * this.delay.getValue());
+                this.durationTicks = (long) (50.0F * this.duration.getValue());
+            }
+        }
+    }
+
+    private void reset() {
+        this.active = false;
+        this.stopForward = false;
+        this.delayTicks = 0L;
+        this.durationTicks = 0L;
+    }
+
     @Override
     public void onDisabled() {
-        this.currentToolSlot = -1;
-        this.previousSlot = -1;
-        this.tickDelayCounter = 0;
+        this.reset();
     }
 }
