@@ -128,7 +128,7 @@ public class AutoClicker extends Module {
                                     && this.blockHitDelay <= 0L
                                     && ItemUtil.isHoldingSword()
                                     && !mc.thePlayer.isUsingItem()
-                                    && RandomUtil.nextInt(1, 100) <= this.blockHitChance.getValue()) {
+                                    && Math.random() * 100.0 < this.blockHitChance.getValue()) {
                                 this.blockHitPending = true;
                                 this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
                                 KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
