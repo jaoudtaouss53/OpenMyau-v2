@@ -76,7 +76,7 @@ public class Wtap extends Module {
             if (event.getPacket() instanceof C02PacketUseEntity
                     && ((C02PacketUseEntity) event.getPacket()).getAction() == Action.ATTACK
                     && !this.active
-                    && this.timer.hasTimeElapsed((long) this.cooldown.getValue())
+                    && this.timer.hasTimeElapsed((long) this.cooldown.getValue().floatValue())
                     && mc.thePlayer.isSprinting()
                     && this.canTrigger()) {
                 this.timer.reset();
