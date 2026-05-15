@@ -22,11 +22,13 @@ public class Wtap extends Module {
     private long durationTicks = 0L;
     public final FloatProperty delay = new FloatProperty("delay", 5.5F, 0.0F, 10.0F);
     public final FloatProperty duration = new FloatProperty("duration", 1.5F, 1.0F, 5.0F);
+    public final FloatProperty cooldown = new FloatProperty("cooldown", 500.0F, 100.0F, 1000.0F);
 
     private boolean canTrigger() {
         return !(mc.thePlayer.movementInput.moveForward < 0.8F)
                 && !mc.thePlayer.isCollidedHorizontally
-                && (!((float) mc.thePlayer.getFoodStats().getFoodLevel() <= 6.0F) || mc.thePlayer.capabilities.allowFlying) && (mc.thePlayer.isSprinting()
+                && (!((float) mc.thePlayer.getFoodStats().getFoodLevel() <= 6.0F) || mc.thePlayer.capabilities.allowFlying)
+                && (mc.thePlayer.isSprinting()
                 || !mc.thePlayer.isUsingItem() && !mc.thePlayer.isPotionActive(Potion.blindness) && mc.gameSettings.keyBindSprint.isKeyDown());
     }
 
@@ -36,26 +38,34 @@ public class Wtap extends Module {
 
     @EventTarget(Priority.LOWEST)
     public void onMoveInput(MoveInputEvent event) {
+        if (!this.isEnabled()) {
+            this.reset();
+            return;
+        }
         if (this.active) {
+            // Cancel if player is no longer in a valid state to wtap
             if (!this.stopForward && !this.canTrigger()) {
-                this.active = false;
-                while (this.delayTicks > 0L) {
-                    this.delayTicks -= 50L;
-                }
-                while (this.durationTicks > 0L) {
-                    this.durationTicks -= 50L;
-                }
-            } else if (this.delayTicks > 0L) {
+                this.reset();
+                return;
+            }
+
+            // Phase 1: waiting out the delay before zeroing forward input
+            if (this.delayTicks > 0L) {
                 this.delayTicks -= 50L;
+                return;
+            }
+
+            // Phase 2: actively zeroing forward input for `duration` ticks
+            if (this.durationTicks > 0L) {
+                this.durationTicks -= 50L;
+                this.stopForward = true;
+                mc.thePlayer.movementInput.moveForward = 0.0F;
+                // Also kill sprint state so the server fully releases sprint
+                mc.thePlayer.setSprinting(false);
             } else {
-                if (this.durationTicks > 0L) {
-                    this.durationTicks -= 50L;
-                    this.stopForward = true;
-                    mc.thePlayer.movementInput.moveForward = 0.0F;
-                }
-                if (this.durationTicks <= 0L) {
-                    this.active = false;
-                }
+                // Duration finished — wtap complete
+                this.active = false;
+                this.stopForward = false;
             }
         }
     }
@@ -66,14 +76,27 @@ public class Wtap extends Module {
             if (event.getPacket() instanceof C02PacketUseEntity
                     && ((C02PacketUseEntity) event.getPacket()).getAction() == Action.ATTACK
                     && !this.active
-                    && this.timer.hasTimeElapsed(500L)
-                    && mc.thePlayer.isSprinting()) {
+                    && this.timer.hasTimeElapsed((long) this.cooldown.getValue())
+                    && mc.thePlayer.isSprinting()
+                    && this.canTrigger()) {
                 this.timer.reset();
                 this.active = true;
                 this.stopForward = false;
-                this.delayTicks = this.delayTicks + (long) (50.0F * this.delay.getValue());
-                this.durationTicks = this.durationTicks + (long) (50.0F * this.duration.getValue());
+                this.delayTicks = (long) (50.0F * this.delay.getValue());
+                this.durationTicks = (long) (50.0F * this.duration.getValue());
             }
         }
+    }
+
+    private void reset() {
+        this.active = false;
+        this.stopForward = false;
+        this.delayTicks = 0L;
+        this.durationTicks = 0L;
+    }
+
+    @Override
+    public void onDisabled() {
+        this.reset();
     }
 }
