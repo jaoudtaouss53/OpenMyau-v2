@@ -10,7 +10,15 @@ import myau.util.RotationUtil;
 import myau.property.properties.BooleanProperty;
 import myau.property.properties.FloatProperty;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockEndStone;
+import net.minecraft.block.BlockGlass;
 import net.minecraft.block.BlockObsidian;
+import net.minecraft.block.BlockPlanks;
+import net.minecraft.block.BlockStainedGlass;
+import net.minecraft.block.BlockStainedGlassPane;
+import net.minecraft.block.BlockGlassPane;
+import net.minecraft.block.properties.IProperty;
+import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemBlock;
@@ -31,7 +39,26 @@ public class FastPlace extends Module {
     public final BooleanProperty blocksOnly = new BooleanProperty("blocks-only", true);
     public final BooleanProperty placeFix = new BooleanProperty("place-fix", true);
     public final BooleanProperty skipObsidian = new BooleanProperty("skip-obsidian", true);
+    public final BooleanProperty skipEndStone = new BooleanProperty("skip-endstone", true);
+    public final BooleanProperty skipOakPlanks = new BooleanProperty("skip-oak-planks", true);
+    public final BooleanProperty skipGlass = new BooleanProperty("skip-glass", true);
     public final BooleanProperty skipInteractable = new BooleanProperty("skip-interactable", true);
+
+    private boolean isOakPlanks(ItemStack stack) {
+        Item item = stack.getItem();
+        if (!(item instanceof ItemBlock)) return false;
+        Block block = ((ItemBlock) item).getBlock();
+        if (!(block instanceof BlockPlanks)) return false;
+        // Metadata 0 = OAK variant
+        return stack.getMetadata() == 0;
+    }
+
+    private boolean isGlass(Block block) {
+        return block instanceof BlockGlass
+                || block instanceof BlockStainedGlass
+                || block instanceof BlockGlassPane
+                || block instanceof BlockStainedGlassPane;
+    }
 
     private boolean canPlace() {
         ItemStack stack = mc.thePlayer.getHeldItem();
@@ -43,6 +70,15 @@ public class FastPlace extends Module {
             if (item instanceof ItemBlock) {
                 Block block = ((ItemBlock) item).getBlock();
                 if (skipObsidian.getValue() && block instanceof BlockObsidian) {
+                    return false;
+                }
+                if (skipEndStone.getValue() && block instanceof BlockEndStone) {
+                    return false;
+                }
+                if (skipOakPlanks.getValue() && isOakPlanks(stack)) {
+                    return false;
+                }
+                if (skipGlass.getValue() && isGlass(block)) {
                     return false;
                 }
                 if (skipInteractable.getValue() && BlockUtil.isInteractable(block)) {
