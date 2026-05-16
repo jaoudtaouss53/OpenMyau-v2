@@ -27,7 +27,8 @@ public class AutoClicker extends Module {
     public final IntProperty maxCPS = new IntProperty("max-cps", 12, 1, 20);
     public final BooleanProperty blockHit = new BooleanProperty("block-hit", false);
     public final FloatProperty blockHitTicks = new FloatProperty("block-hit-ticks", 1.5F, 1.0F, 20.0F, this.blockHit::getValue);
-    public final IntProperty blockHitChance = new IntProperty("block-hit-chance", 100, 0, 100, this.blockHit::getValue);
+    public final IntProperty blockHitMinChance = new IntProperty("block-hit-min-chance", 60, 0, 100, this.blockHit::getValue);
+    public final IntProperty blockHitMaxChance = new IntProperty("block-hit-max-chance", 80, 0, 100, this.blockHit::getValue);
     public final FloatProperty blockHitRange = new FloatProperty("block-hit-range", 4.0F, 1.0F, 8.0F, this.blockHit::getValue);
     public final BooleanProperty weaponsOnly = new BooleanProperty("weapons-only", true);
     public final BooleanProperty allowTools = new BooleanProperty("allow-tools", false, this.weaponsOnly::getValue);
@@ -42,6 +43,24 @@ public class AutoClicker extends Module {
 
     private long getBlockHitDelay() {
         return (long) (50.0F * this.blockHitTicks.getValue());
+    }
+
+    /**
+     * Picks a random chance value between min and max, then rolls against it.
+     * Example: min=40, max=80 → rolls a random target between 40-80, then rolls if hit succeeds.
+     */
+    private boolean rollBlockHitChance() {
+        int min = this.blockHitMinChance.getValue();
+        int max = this.blockHitMaxChance.getValue();
+        if (min > max) {
+            int tmp = min;
+            min = max;
+            max = tmp;
+        }
+        // Pick a target chance between min and max
+        int targetChance = min + (int) (Math.random() * (max - min + 1));
+        // Roll against the picked target
+        return Math.random() * 100.0 < targetChance;
     }
 
     private boolean isBreakingBlock() {
@@ -91,7 +110,6 @@ public class AutoClicker extends Module {
                 .anyMatch(this::isValidTarget);
     }
 
-    // Checks if any non-self player is within blockHitRange distance
     private boolean isPlayerNearby() {
         double rangeSq = this.blockHitRange.getValue() * this.blockHitRange.getValue();
         return mc.theWorld
@@ -141,15 +159,13 @@ public class AutoClicker extends Module {
                             didClickThisTick = true;
                         }
 
-                        // Roll blockhit ONCE per tick (not per queued click) — fixes inflated chance.
-                        // Only blockhit if: a click actually fired, a player is nearby, and chance roll passes.
                         if (didClickThisTick
                                 && this.blockHit.getValue()
                                 && this.blockHitDelay <= 0L
                                 && ItemUtil.isHoldingSword()
                                 && !mc.thePlayer.isUsingItem()
                                 && this.isPlayerNearby()
-                                && Math.random() * 100.0 < this.blockHitChance.getValue()) {
+                                && this.rollBlockHitChance()) {
                             this.blockHitPending = true;
                             this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
                             KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
@@ -182,10 +198,15 @@ public class AutoClicker extends Module {
             if (this.minCPS.getValue() > this.maxCPS.getValue()) {
                 this.maxCPS.setValue(this.minCPS.getValue());
             }
-        } else {
-            if (this.maxCPS.getName().equals(mode) && this.minCPS.getValue() > this.maxCPS.getValue()) {
-                this.minCPS.setValue(this.maxCPS.getValue());
+        } else if (this.maxCPS.getName().equals(mode) && this.minCPS.getValue() > this.maxCPS.getValue()) {
+            this.minCPS.setValue(this.maxCPS.getValue());
+        } else if (this.blockHitMinChance.getName().equals(mode)) {
+            if (this.blockHitMinChance.getValue() > this.blockHitMaxChance.getValue()) {
+                this.blockHitMaxChance.setValue(this.blockHitMinChance.getValue());
             }
+        } else if (this.blockHitMaxChance.getName().equals(mode)
+                && this.blockHitMinChance.getValue() > this.blockHitMaxChance.getValue()) {
+            this.blockHitMinChance.setValue(this.blockHitMaxChance.getValue());
         }
     }
 
