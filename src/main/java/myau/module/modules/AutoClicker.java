@@ -13,6 +13,8 @@ import myau.property.properties.IntProperty;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.MovingObjectPosition.MovingObjectType;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.Vec3;
 import net.minecraft.world.WorldSettings.GameType;
 
 import java.util.Objects;
@@ -26,10 +28,13 @@ public class AutoClicker extends Module {
     public final IntProperty minCPS = new IntProperty("min-cps", 8, 1, 20);
     public final IntProperty maxCPS = new IntProperty("max-cps", 12, 1, 20);
     public final BooleanProperty blockHit = new BooleanProperty("block-hit", false);
+    public final BooleanProperty blockHitPredict = new BooleanProperty("block-hit-predict", false, this.blockHit::getValue);
     public final FloatProperty blockHitTicks = new FloatProperty("block-hit-ticks", 1.5F, 1.0F, 20.0F, this.blockHit::getValue);
     public final IntProperty blockHitMinChance = new IntProperty("block-hit-min-chance", 60, 0, 100, this.blockHit::getValue);
     public final IntProperty blockHitMaxChance = new IntProperty("block-hit-max-chance", 80, 0, 100, this.blockHit::getValue);
     public final FloatProperty blockHitRange = new FloatProperty("block-hit-range", 4.0F, 1.0F, 8.0F, this.blockHit::getValue);
+    public final FloatProperty blockHitPredictRange = new FloatProperty("block-hit-predict-range", 4.0F, 1.0F, 6.0F, () -> this.blockHit.getValue() && this.blockHitPredict.getValue());
+    public final IntProperty blockHitPredictSwingTick = new IntProperty("block-hit-predict-swing-tick", 2, 0, 5, () -> this.blockHit.getValue() && this.blockHitPredict.getValue());
     public final BooleanProperty weaponsOnly = new BooleanProperty("weapons-only", true);
     public final BooleanProperty allowTools = new BooleanProperty("allow-tools", false, this.weaponsOnly::getValue);
     public final BooleanProperty breakBlocks = new BooleanProperty("break-blocks", true);
@@ -123,6 +128,50 @@ public class AutoClicker extends Module {
                         && p.getDistanceSqToEntity(mc.thePlayer) <= rangeSq);
     }
 
+    /**
+     * Checks if opponent is facing towards the local player.
+     */
+    private boolean isFacingPlayer(EntityPlayer opponent) {
+        Vec3 toPlayer = new Vec3(
+                mc.thePlayer.posX - opponent.posX,
+                mc.thePlayer.posY - opponent.posY,
+                mc.thePlayer.posZ - opponent.posZ
+        ).normalize();
+
+        float yawRad = (float) Math.toRadians(opponent.rotationYaw);
+        float pitchRad = (float) Math.toRadians(opponent.rotationPitch);
+        Vec3 lookVec = new Vec3(
+                -MathHelper.sin(yawRad) * MathHelper.cos(pitchRad),
+                -MathHelper.sin(pitchRad),
+                MathHelper.cos(yawRad) * MathHelper.cos(pitchRad)
+        );
+
+        double dot = toPlayer.xCoord * lookVec.xCoord + toPlayer.yCoord * lookVec.yCoord + toPlayer.zCoord * lookVec.zCoord;
+        return dot > 0.5;
+    }
+
+    /**
+     * Predict mode: returns true if any nearby opponent is about to hit us.
+     * Detects opponent swing in early phase while they are facing us and in range.
+     */
+    private boolean shouldPredictBlock() {
+        double rangeSq = this.blockHitPredictRange.getValue() * this.blockHitPredictRange.getValue();
+        int maxSwingTick = this.blockHitPredictSwingTick.getValue();
+
+        return mc.theWorld
+                .loadedEntityList
+                .stream()
+                .filter(e -> e instanceof EntityPlayer)
+                .map(e -> (EntityPlayer) e)
+                .filter(p -> p != mc.thePlayer
+                        && p != mc.thePlayer.ridingEntity
+                        && p.deathTime <= 0
+                        && p.getDistanceSqToEntity(mc.thePlayer) <= rangeSq)
+                .anyMatch(p -> p.isSwingInProgress
+                        && p.swingProgressInt <= maxSwingTick
+                        && this.isFacingPlayer(p));
+    }
+
     public AutoClicker() {
         super("AutoClicker", false);
     }
@@ -163,13 +212,24 @@ public class AutoClicker extends Module {
                                 && this.blockHit.getValue()
                                 && this.blockHitDelay <= 0L
                                 && ItemUtil.isHoldingSword()
-                                && !mc.thePlayer.isUsingItem()
-                                && this.isPlayerNearby()
-                                && this.rollBlockHitChance()) {
-                            this.blockHitPending = true;
-                            this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
-                            KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
-                            KeyBindUtil.pressKeyOnce(mc.gameSettings.keyBindUseItem.getKeyCode());
+                                && !mc.thePlayer.isUsingItem()) {
+
+                            boolean shouldBlock;
+
+                            if (this.blockHitPredict.getValue()) {
+                                // Predict mode: only block if opponent is about to hit us
+                                shouldBlock = this.shouldPredictBlock();
+                            } else {
+                                // Auto mode: block based on chance + nearby player check
+                                shouldBlock = this.isPlayerNearby() && this.rollBlockHitChance();
+                            }
+
+                            if (shouldBlock) {
+                                this.blockHitPending = true;
+                                this.blockHitDelay = this.blockHitDelay + this.getBlockHitDelay();
+                                KeyBindUtil.setKeyBindState(mc.gameSettings.keyBindUseItem.getKeyCode(), false);
+                                KeyBindUtil.pressKeyOnce(mc.gameSettings.keyBindUseItem.getKeyCode());
+                            }
                         }
                     }
                 }
@@ -216,4 +276,5 @@ public class AutoClicker extends Module {
                 ? new String[]{this.minCPS.getValue().toString()}
                 : new String[]{String.format("%d-%d", this.minCPS.getValue(), this.maxCPS.getValue())};
     }
+
 }
