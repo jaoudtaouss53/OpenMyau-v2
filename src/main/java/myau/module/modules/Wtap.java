@@ -1,4 +1,5 @@
 package myau.module.modules;
+
   import myau.event.EventTarget;
   import myau.event.types.EventType;
   import myau.event.types.Priority;
@@ -8,9 +9,11 @@ package myau.module.modules;
   import myau.util.TimerUtil;
   import myau.property.properties.FloatProperty;
   import net.minecraft.client.Minecraft;
+  import net.minecraft.client.settings.KeyBinding;
   import net.minecraft.network.play.client.C02PacketUseEntity;
   import net.minecraft.network.play.client.C02PacketUseEntity.Action;
   import net.minecraft.potion.Potion;
+  import org.lwjgl.input.Keyboard;
 
   public class Wtap extends Module {
       private static final Minecraft mc = Minecraft.getMinecraft();
@@ -66,7 +69,9 @@ package myau.module.modules;
                   break;
 
               case RELEASE:
-                  // Release W and kill sprint — this breaks the sprint
+                  // Actually release the W key at input level so the game sees it
+                  KeyBinding.setKeyBindState(mc.gameSettings.keyBindForward.getKeyCode(),
+  false);
                   mc.thePlayer.movementInput.moveForward = 0.0F;
                   mc.thePlayer.setSprinting(false);
                   if (this.phaseTicks <= 0L) {
@@ -78,9 +83,8 @@ package myau.module.modules;
                   break;
 
               case REPRESS:
-                  // Force W back down to gain a fresh sprint for the next hit
-                  mc.thePlayer.movementInput.moveForward = 1.0F;
-                  mc.thePlayer.setSprinting(true);
+                  // Actually press W key back down — sprint re-engages via held sprint key
+                  KeyBinding.setKeyBindState(mc.gameSettings.keyBindForward.getKeyCode(), true);                  mc.thePlayer.movementInput.moveForward = 1.0F;
                   if (this.phaseTicks <= 0L) {
                       this.reset();
                   } else {
@@ -108,6 +112,11 @@ package myau.module.modules;
       private void reset() {
           this.phase = Phase.IDLE;
           this.phaseTicks = 0L;
+          // Restore forward key to match the actual physical key state
+          KeyBinding.setKeyBindState(
+                  mc.gameSettings.keyBindForward.getKeyCode(),
+                  Keyboard.isKeyDown(mc.gameSettings.keyBindForward.getKeyCode())
+          );
       }
 
       @Override
