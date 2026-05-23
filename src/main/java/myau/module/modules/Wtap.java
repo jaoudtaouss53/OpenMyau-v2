@@ -1,102 +1,117 @@
 package myau.module.modules;
+  import myau.event.EventTarget;
+  import myau.event.types.EventType;
+  import myau.event.types.Priority;
+  import myau.events.MoveInputEvent;
+  import myau.events.PacketEvent;
+  import myau.module.Module;
+  import myau.util.TimerUtil;
+  import myau.property.properties.FloatProperty;
+  import net.minecraft.client.Minecraft;
+  import net.minecraft.network.play.client.C02PacketUseEntity;
+  import net.minecraft.network.play.client.C02PacketUseEntity.Action;
+  import net.minecraft.potion.Potion;
 
-import myau.event.EventTarget;
-import myau.event.types.EventType;
-import myau.event.types.Priority;
-import myau.events.MoveInputEvent;
-import myau.events.PacketEvent;
-import myau.module.Module;
-import myau.util.TimerUtil;
-import myau.property.properties.FloatProperty;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.play.client.C02PacketUseEntity;
-import net.minecraft.network.play.client.C02PacketUseEntity.Action;
-import net.minecraft.potion.Potion;
+  public class Wtap extends Module {
+      private static final Minecraft mc = Minecraft.getMinecraft();
+      private final TimerUtil timer = new TimerUtil();
 
-public class Wtap extends Module {
-    private static final Minecraft mc = Minecraft.getMinecraft();
-    private final TimerUtil timer = new TimerUtil();
-    private boolean active = false;
-    private boolean stopForward = false;
-    private long delayTicks = 0L;
-    private long durationTicks = 0L;
-    public final FloatProperty delay = new FloatProperty("delay", 5.5F, 0.0F, 10.0F);
-    public final FloatProperty duration = new FloatProperty("duration", 1.5F, 1.0F, 5.0F);
-    public final FloatProperty cooldown = new FloatProperty("cooldown", 500.0F, 100.0F, 1000.0F);
+      private enum Phase { IDLE, DELAY, RELEASE, REPRESS }
+      private Phase phase = Phase.IDLE;
+      private long phaseTicks = 0L;
 
-    private boolean canTrigger() {
-        return !(mc.thePlayer.movementInput.moveForward < 0.8F)
-                && !mc.thePlayer.isCollidedHorizontally
-                && (!((float) mc.thePlayer.getFoodStats().getFoodLevel() <= 6.0F) || mc.thePlayer.capabilities.allowFlying)
-                && (mc.thePlayer.isSprinting()
-                || !mc.thePlayer.isUsingItem() && !mc.thePlayer.isPotionActive(Potion.blindness) && mc.gameSettings.keyBindSprint.isKeyDown());
-    }
+      public final FloatProperty delay = new FloatProperty("delay", 5.5F, 0.0F, 10.0F);
+      public final FloatProperty duration = new FloatProperty("duration", 1.5F, 1.0F, 5.0F);
+      public final FloatProperty repressTime = new FloatProperty("repress-time", 2.0F, 1.0F,
+  5.0F);
+      public final FloatProperty cooldown = new FloatProperty("cooldown", 500.0F, 100.0F,
+  1000.0F);
 
-    public Wtap() {
-        super("WTap", false);
-    }
+      public Wtap() {
+          super("WTap", false);
+      }
 
-    @EventTarget(Priority.LOWEST)
-    public void onMoveInput(MoveInputEvent event) {
-        if (!this.isEnabled()) {
-            this.reset();
-            return;
-        }
-        if (this.active) {
-            // Cancel if player is no longer in a valid state to wtap
-            if (!this.stopForward && !this.canTrigger()) {
-                this.reset();
-                return;
-            }
+      private boolean canTrigger() {
+          return !(mc.thePlayer.movementInput.moveForward < 0.8F)
+                  && !mc.thePlayer.isCollidedHorizontally
+                  && (!((float) mc.thePlayer.getFoodStats().getFoodLevel() <= 6.0F) ||
+  mc.thePlayer.capabilities.allowFlying)
+                  && (mc.thePlayer.isSprinting()
+                  || !mc.thePlayer.isUsingItem() &&
+  !mc.thePlayer.isPotionActive(Potion.blindness) && mc.gameSettings.keyBindSprint.isKeyDown());
+      }
 
-            // Phase 1: waiting out the delay before zeroing forward input
-            if (this.delayTicks > 0L) {
-                this.delayTicks -= 50L;
-                return;
-            }
+      @EventTarget(Priority.LOWEST)
+      public void onMoveInput(MoveInputEvent event) {
+          if (!this.isEnabled()) {
+              this.reset();
+              return;
+          }
 
-            // Phase 2: actively zeroing forward input for `duration` ticks
-            if (this.durationTicks > 0L) {
-                this.durationTicks -= 50L;
-                this.stopForward = true;
-                mc.thePlayer.movementInput.moveForward = 0.0F;
-                // Also kill sprint state so the server fully releases sprint
-                mc.thePlayer.setSprinting(false);
-            } else {
-                // Duration finished — wtap complete
-                this.active = false;
-                this.stopForward = false;
-            }
-        }
-    }
+          switch (this.phase) {
+              case IDLE:
+                  break;
 
-    @EventTarget
-    public void onPacket(PacketEvent event) {
-        if (this.isEnabled() && !event.isCancelled() && event.getType() == EventType.SEND) {
-            if (event.getPacket() instanceof C02PacketUseEntity
-                    && ((C02PacketUseEntity) event.getPacket()).getAction() == Action.ATTACK
-                    && !this.active
-                    && this.timer.hasTimeElapsed((long) this.cooldown.getValue().floatValue())
-                    && mc.thePlayer.isSprinting()
-                    && this.canTrigger()) {
-                this.timer.reset();
-                this.active = true;
-                this.stopForward = false;
-                this.delayTicks = (long) (50.0F * this.delay.getValue());
-                this.durationTicks = (long) (50.0F * this.duration.getValue());
-            }
-        }
-    }
+              case DELAY:
+                  if (!this.canTrigger()) {
+                      this.reset();
+                      return;
+                  }
+                  if (this.phaseTicks <= 0L) {
+                      this.phase = Phase.RELEASE;
+                      this.phaseTicks = (long) (50.0F * this.duration.getValue());
+                  } else {
+                      this.phaseTicks -= 50L;
+                  }
+                  break;
 
-    private void reset() {
-        this.active = false;
-        this.stopForward = false;
-        this.delayTicks = 0L;
-        this.durationTicks = 0L;
-    }
+              case RELEASE:
+                  // Release W and kill sprint — this breaks the sprint
+                  mc.thePlayer.movementInput.moveForward = 0.0F;
+                  mc.thePlayer.setSprinting(false);
+                  if (this.phaseTicks <= 0L) {
+                      this.phase = Phase.REPRESS;
+                      this.phaseTicks = (long) (50.0F * this.repressTime.getValue());
+                  } else {
+                      this.phaseTicks -= 50L;
+                  }
+                  break;
 
-    @Override
-    public void onDisabled() {
-        this.reset();
-    }
-}
+              case REPRESS:
+                  // Force W back down to gain a fresh sprint for the next hit
+                  mc.thePlayer.movementInput.moveForward = 1.0F;
+                  mc.thePlayer.setSprinting(true);
+                  if (this.phaseTicks <= 0L) {
+                      this.reset();
+                  } else {
+                      this.phaseTicks -= 50L;
+                  }
+                  break;
+          }
+      }
+
+      @EventTarget
+      public void onPacket(PacketEvent event) {
+          if (this.isEnabled() && !event.isCancelled() && event.getType() == EventType.SEND) {
+              if (event.getPacket() instanceof C02PacketUseEntity
+                      && ((C02PacketUseEntity) event.getPacket()).getAction() == Action.ATTACK
+                      && this.phase == Phase.IDLE
+                      && this.timer.hasTimeElapsed((long) this.cooldown.getValue().floatValue())                      && mc.thePlayer.isSprinting()
+                      && this.canTrigger()) {
+                  this.timer.reset();
+                  this.phase = Phase.DELAY;
+                  this.phaseTicks = (long) (50.0F * this.delay.getValue());
+              }
+          }
+      }
+
+      private void reset() {
+          this.phase = Phase.IDLE;
+          this.phaseTicks = 0L;
+      }
+
+      @Override
+      public void onDisabled() {
+          this.reset();
+      }
+  }
